@@ -86,9 +86,13 @@ module.exports = (config) => {
   event.dispatcher.on(event.test.finished, (test) => {
     console.log(`test.finished - ${inspect(test)}`);
     recorder.add(async () => {
-      await mobileHelper.stopRecord(`./output/record-test-${test.uid}.mp4`);
+      await mobileHelper.stopRecord(getRecordTestFile(test.uid));
     });
   });
+
+  function getRecordTestFile(testId) {
+    return `./output/record-test-${testId}.mp4`;
+  }
 
   async function startTestItem(launchId, testTitle, method, parentId = null) {
     try {
@@ -202,6 +206,21 @@ module.exports = (config) => {
           testError: test.err,
           testSteps: test.steps,
         });
+        console.log(`check Record file`);
+        let recordFile = getRecordTestFile(test.uid);
+        if (fs.existsSync(recordFile)) {
+          console.log(`send record file`);
+          let recordBody = await attachScreenRecord(recordFile);
+          console.log(`recordBody = ${inspect(recordBody)}`);
+          await sendLogToRP({
+            tempId: testObj.tempId,
+            level: "debug",
+            message: "Screen record",
+            screenshotData: recordBody,
+          });
+          console.log(`send record file success`);
+        }
+
         await finishStepItem(testObj);
       }
     }
@@ -292,7 +311,7 @@ module.exports = (config) => {
     }
 
     return {
-      name: fileName,
+      name: clearString(fileName),
       type: "video/mp4",
       content,
     };
