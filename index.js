@@ -1,31 +1,24 @@
-const RPClient = require('@reportportal/client-javascript');
-const fs = require('fs');
-const path = require('path');
-const debug = require('debug')('codeceptjs:reportportal');
-const { isMainThread } = require('worker_threads');
-const { clearString } = require('codeceptjs/lib/utils');
+const RPClient = require("@reportportal/client-javascript");
+const fs = require("fs");
+const path = require("path");
+const debug = require("debug")("codeceptjs:reportportal");
+const { isMainThread } = require("worker_threads");
+const { clearString } = require("codeceptjs/lib/utils");
+const { inspect } = require("util");
 
-const {
-  event, recorder, output, container,
-} = codeceptjs;
+const { event, recorder, output, container } = codeceptjs;
 
 const helpers = container.helpers();
 let helper;
 let isControlThread;
 
-const rp_FAILED = 'FAILED';
-const rp_PASSED = 'PASSED';
-const rp_SUITE = 'SUITE';
-const rp_TEST = 'TEST';
-const rp_STEP = 'STEP';
+const rp_FAILED = "FAILED";
+const rp_PASSED = "PASSED";
+const rp_SUITE = "SUITE";
+const rp_TEST = "TEST";
+const rp_STEP = "STEP";
 
-const screenshotHelpers = [
-  'WebDriver',
-  'Appium',
-  'Puppeteer',
-  'TestCafe',
-  'Playwright',
-];
+const screenshotHelpers = ["WebDriver", "Appium", "Puppeteer", "TestCafe", "Playwright"];
 
 for (const helperName of screenshotHelpers) {
   if (Object.keys(helpers).indexOf(helperName) > -1) {
@@ -34,10 +27,10 @@ for (const helperName of screenshotHelpers) {
 }
 
 const defaultConfig = {
-  apiKey: '',
-  endpoint: '',
-  project: '',
-  launchDescription: '',
+  apiKey: "",
+  endpoint: "",
+  project: "",
+  launchDescription: "",
   attributes: [],
   debug: false,
   rerun: undefined,
@@ -82,11 +75,15 @@ module.exports = (config) => {
   async function startTestItem(launchId, testTitle, method, parentId = null) {
     try {
       const hasStats = method !== rp_STEP;
-      return rpClient.startTestItem({
-        name: testTitle,
-        type: method,
-        hasStats,
-      }, launchId, parentId);
+      return rpClient.startTestItem(
+        {
+          name: testTitle,
+          type: method,
+          hasStats,
+        },
+        launchId,
+        parentId,
+      );
     } catch (error) {
       console.log(error);
     }
@@ -132,7 +129,12 @@ module.exports = (config) => {
 
     if (process.env.RUNS_WITH_WORKERS) {
       for (test of testArr.passed) {
-        testObj = await startTestItem(launchObj.tempId, test.title, rp_TEST, suiteTempIdArr.find((element) => element.suiteTitle === test.parent.title).suiteTempId);
+        testObj = await startTestItem(
+          launchObj.tempId,
+          test.title,
+          rp_TEST,
+          suiteTempIdArr.find((element) => element.suiteTitle === test.parent.title).suiteTempId,
+        );
         testObj.status = rp_PASSED;
 
         testTempIdArr.push({
@@ -146,7 +148,12 @@ module.exports = (config) => {
       }
 
       for (test of testArr.failed) {
-        testObj = await startTestItem(launchObj.tempId, test.title, rp_TEST, suiteTempIdArr.find((element) => element.suiteTitle === test.parent.title).suiteTempId);
+        testObj = await startTestItem(
+          launchObj.tempId,
+          test.title,
+          rp_TEST,
+          suiteTempIdArr.find((element) => element.suiteTitle === test.parent.title).suiteTempId,
+        );
         testObj.status = rp_FAILED;
 
         testTempIdArr.push({
@@ -160,7 +167,12 @@ module.exports = (config) => {
       }
     } else {
       for (test of testArr) {
-        testObj = await startTestItem(launchObj.tempId, test.title, rp_TEST, suiteTempIdArr.find((element) => element.suiteTitle === test.parent.title).suiteTempId);
+        testObj = await startTestItem(
+          launchObj.tempId,
+          test.title,
+          rp_TEST,
+          suiteTempIdArr.find((element) => element.suiteTitle === test.parent.title).suiteTempId,
+        );
         testObj.status = rp_FAILED;
 
         testTempIdArr.push({
@@ -175,23 +187,36 @@ module.exports = (config) => {
 
     for (test of testTempIdArr) {
       for (step of test.testSteps) {
-        const stepTitle = `[STEP] - ${step.actor} ${step.name} ${(step.args ? step.args.join(' ') : '')}`;
+        const stepTitle = `[STEP] - ${step.actor} ${step.name} ${step.args ? step.args.join(" ") : ""}`;
         const stepObj = await startTestItem(launchObj.tempId, stepTitle, rp_STEP, test.testTempId);
         stepObj.status = step.status || rp_PASSED;
         await finishStepItem(stepObj);
 
-
-        if (stepObj.status === 'failed' && step.err) {
-          await sendLogToRP({ tempId: stepObj.tempId, level: 'ERROR', message: `[FAILED STEP] - ${(step.err.stack ? step.err.stack : JSON.stringify(step.err))}` });
+        if (stepObj.status === "failed" && step.err) {
           await sendLogToRP({
-            tempId: stepObj.tempId, level: 'debug', message: 'Last seen screenshot', screenshotData: await attachScreenshot(`${clearString(test.testTitle)}.failed.png`),
+            tempId: stepObj.tempId,
+            level: "ERROR",
+            message: `[FAILED STEP] - ${step.err.stack ? step.err.stack : JSON.stringify(step.err)}`,
+          });
+          await sendLogToRP({
+            tempId: stepObj.tempId,
+            level: "debug",
+            message: "Last seen screenshot",
+            screenshotData: await attachScreenshot(`${clearString(test.testTitle)}.failed.png`),
           });
         }
 
-        if (stepObj.status === 'failed' && step.test.err) {
-          await sendLogToRP({ tempId: stepObj.tempId, level: 'ERROR', message: `[FAILED STEP] - ${JSON.stringify(step.test.err)}` });
+        if (stepObj.status === "failed" && step.test.err) {
           await sendLogToRP({
-            tempId: stepObj.tempId, level: 'debug', message: 'Last seen screenshot', screenshotData: await attachScreenshot(`${clearString(test.testTitle)}.failed.png`),
+            tempId: stepObj.tempId,
+            level: "ERROR",
+            message: `[FAILED STEP] - ${JSON.stringify(step.test.err)}`,
+          });
+          await sendLogToRP({
+            tempId: stepObj.tempId,
+            level: "debug",
+            message: "Last seen screenshot",
+            screenshotData: await attachScreenshot(`${clearString(test.testTitle)}.failed.png`),
           });
         }
       }
@@ -219,13 +244,15 @@ module.exports = (config) => {
     return rpClient.startLaunch(launchOpts);
   }
 
-  async function sendLogToRP({
-    tempId, level, message, screenshotData,
-  }) {
-    return rpClient.sendLog(tempId, {
-      level,
-      message,
-    }, screenshotData).promise;
+  async function sendLogToRP({ tempId, level, message, screenshotData }) {
+    return rpClient.sendLog(
+      tempId,
+      {
+        level,
+        message,
+      },
+      screenshotData,
+    ).promise;
   }
 
   async function attachScreenshot(fileName) {
@@ -239,7 +266,7 @@ module.exports = (config) => {
         content = fs.readFileSync(path.join(global.output_dir, fileName));
         fs.unlinkSync(path.join(global.output_dir, fileName));
       } catch (err) {
-        output.error('Couldn\'t save screenshot');
+        output.error("Couldn't save screenshot");
         return undefined;
       }
     } else {
@@ -248,7 +275,7 @@ module.exports = (config) => {
 
     return {
       name: fileName,
-      type: 'image/png',
+      type: "image/png",
       content,
     };
   }
@@ -256,11 +283,22 @@ module.exports = (config) => {
   async function finishLaunch() {
     try {
       debug(`${launchObj.tempId} Finished launch: ${launchStatus}`);
-      await rpClient.finishLaunch(launchObj.tempId, {
+      let result = await rpClient.finishLaunch(launchObj.tempId, {
         status: launchStatus,
         endTime: rpClient.helpers.now(),
-      });
+      }).promise;
+      console.log(`sendLaunch result = ${inspect(result)}`);
+      fs.writeFile(
+        "../test_result_env.sh",
+        `
+          export REPORT_PORTAL_RESULT_LINK="${result.link}"
+        `,
+        function (err) {
+          if (err) throw err;
+        },
+      );
     } catch (error) {
+      console.log(`finishLaunch error : ${inspect(error)}`);
       debug(error);
     }
   }
@@ -303,7 +341,6 @@ module.exports = (config) => {
     });
   }
 
-
   return this;
 };
 
@@ -318,18 +355,18 @@ function iterateMetaSteps(step, fn) {
   if (step) fn(step);
 }
 
-
 const isEqualMetaStep = (metastep1, metastep2) => {
   if (!metastep1 && !metastep2) return true;
   if (!metastep1 || !metastep2) return false;
-  return metastep1.actor === metastep2.actor
-      && metastep1.name === metastep2.name
-      && metastep1.args.join(',') === metastep2.args.join(',');
+  return (
+    metastep1.actor === metastep2.actor &&
+    metastep1.name === metastep2.name &&
+    metastep1.args.join(",") === metastep2.args.join(",")
+  );
 };
 
-
 function rpStatus(status) {
-  if (status === 'success') return rp_PASSED;
-  if (status === 'failed') return rp_FAILED;
+  if (status === "success") return rp_PASSED;
+  if (status === "failed") return rp_FAILED;
   return status;
 }
