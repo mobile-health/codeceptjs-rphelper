@@ -18,13 +18,17 @@ const rp_SUITE = "SUITE";
 const rp_TEST = "TEST";
 const rp_STEP = "STEP";
 
+console.log(`all Helpers = ${inspect(helpers)}`);
 const screenshotHelpers = ["WebDriver", "Appium", "Puppeteer", "TestCafe", "Playwright"];
 
 for (const helperName of screenshotHelpers) {
   if (Object.keys(helpers).indexOf(helperName) > -1) {
     helper = helpers[helperName];
+    break;
   }
 }
+
+const mobileHelper = helpers["MobileDriver"];
 
 const defaultConfig = {
   apiKey: "",
@@ -72,6 +76,20 @@ module.exports = (config) => {
     testArr.push(test);
   });
 
+  event.dispatcher.on(event.test.started, (test) => {
+    console.log(`test.started - ${inspect(test)}`);
+    recorder.add(async () => {
+      await mobileHelper.startRecord();
+    });
+  });
+
+  event.dispatcher.on(event.test.finished, (test) => {
+    console.log(`test.finished - ${inspect(test)}`);
+    recorder.add(async () => {
+      await mobileHelper.stopRecord(`./output/record-test-${test.uid}.mp4`);
+    });
+  });
+
   async function startTestItem(launchId, testTitle, method, parentId = null) {
     try {
       const hasStats = method !== rp_STEP;
@@ -104,6 +122,8 @@ module.exports = (config) => {
   });
 
   async function _sendResultsToRP(result) {
+    console.log(`_sendResultsToRP result = ${inspect(result)}`);
+
     if (result) {
       for (suite of result.suites) {
         suiteArr.add(suite.title);
@@ -127,6 +147,7 @@ module.exports = (config) => {
       await finishStepItem(suiteObj);
     }
 
+    console.log(`testArr = ${inspect(testArr)}`);
     if (process.env.RUNS_WITH_WORKERS) {
       for (test of testArr.passed) {
         testObj = await startTestItem(
@@ -253,6 +274,28 @@ module.exports = (config) => {
       },
       screenshotData,
     ).promise;
+  }
+
+  async function attachScreenRecord(fileName) {
+    if (!mobileHelper) return undefined;
+
+    let content;
+
+    if (fileName) {
+      try {
+        content = fs.readFileSync(fileName);
+        fs.unlinkSync(fileName);
+      } catch (err) {
+        output.error("Couldn't find screenRecord");
+        return undefined;
+      }
+    }
+
+    return {
+      name: fileName,
+      type: "video/mp4",
+      content,
+    };
   }
 
   async function attachScreenshot(fileName) {
