@@ -54,6 +54,7 @@ module.exports = (config) => {
   const suiteArr = new Set();
   let testArr = [];
   const stepArr = [];
+  let metaStepsSet = {};
 
   event.dispatcher.on(event.suite.before, (suite) => {
     suiteArr.add(suite.title);
@@ -76,14 +77,14 @@ module.exports = (config) => {
   });
 
   event.dispatcher.on(event.test.started, (test) => {
-    output.debug(`test.started - ${inspect(test)}`);
+    // output.debug(`test.started - ${inspect(test)}`);
     recorder.add(async () => {
       await mobileHelper.startRecord();
     });
   });
 
   event.dispatcher.on(event.test.finished, (test) => {
-    output.debug(`test.finished - ${inspect(test)}`);
+    // output.debug(`test.finished - ${inspect(test)}`);
     recorder.add(async () => {
       await mobileHelper.stopRecord(getRecordTestFile(test.uid));
     });
@@ -96,7 +97,7 @@ module.exports = (config) => {
   async function startTestItem(launchId, testTitle, method, parentId = null) {
     try {
       const hasStats = method !== rp_STEP;
-      return rpClient.startTestItem(
+      const result = rpClient.startTestItem(
         {
           name: testTitle,
           type: method,
@@ -105,8 +106,10 @@ module.exports = (config) => {
         launchId,
         parentId,
       );
+      // output.debug(`startTestItem result = ${inspect(result)}`);
+      return result;
     } catch (error) {
-      console.log(error);
+      output.error(error);
     }
   }
 
@@ -125,8 +128,6 @@ module.exports = (config) => {
   });
 
   async function _sendResultsToRP(result) {
-    output.debug(`_sendResultsToRP result = ${inspect(result)}`);
-
     if (result) {
       for (suite of result.suites) {
         suiteArr.add(suite.title);
@@ -150,7 +151,7 @@ module.exports = (config) => {
       await finishStepItem(suiteObj);
     }
 
-    output.debug(`testArr = ${inspect(testArr)}`);
+    // output.debug(`testArr = ${inspect(testArr)}`);
     if (process.env.RUNS_WITH_WORKERS) {
       for (test of testArr.passed) {
         testObj = await startTestItem(
@@ -223,11 +224,17 @@ module.exports = (config) => {
 
     for (test of testTempIdArr) {
       for (step of test.testSteps) {
-        output.debug(`step = \n${inspect(step)}`)
-        let args = step.args ? step.args : {}
-        args = JSON.stringify(args)
+        await startMetaSteps(step, test);
+        let args = step.args ? step.args : {};
+        args = JSON.stringify(args);
+        // output.debug(`step = ${inspect(step)}`);
+        let metaStep = step.metaStep;
+        metaStep = metaStep ? metaStepsSet[getKeyOfMetaStep(metaStep)] : undefined;
+        // output.debug(`metaStep = ${inspect(metaStep)}`);
+        let parentId = test.testTempId;
+
         const stepTitle = `[STEP] - ${step.actor} ${step.name} ${args}`;
-        const stepObj = await startTestItem(launchObj.tempId, stepTitle, rp_STEP, test.testTempId);
+        const stepObj = await startTestItem(launchObj.tempId, stepTitle, rp_STEP, parentId);
         stepObj.status = step.status || rp_PASSED;
         await finishStepItem(stepObj);
 
@@ -259,6 +266,15 @@ module.exports = (config) => {
           });
         }
       }
+
+      // output.debug(`metaStepsSet = ${inspect(metaStepsSet)}`);
+      for (const key in metaStepsSet) {
+        const metaStep = metaStepsSet[key];
+        metaStep.metaStepObj.status = metaStep.metaStep.status;
+        await finishStepItem(metaStep.metaStepObj);
+      }
+
+      metaStepsSet = {};
     }
 
     await finishLaunch();
@@ -348,7 +364,7 @@ module.exports = (config) => {
         status: launchStatus,
         endTime: rpClient.helpers.now(),
       }).promise;
-      output.debug(`sendLaunch result = ${inspect(result)}`);
+      // output.debug(`sendLaunch result = ${inspect(result)}`);
       fs.writeFile(
         "../test_result_env.sh",
         `
@@ -364,42 +380,71 @@ module.exports = (config) => {
     }
   }
 
-  async function startMetaSteps(step) {
-    let metaStepObj = {};
+  async function startMetaSteps(step, test) {
     const metaSteps = metaStepsToArray(step.metaStep);
 
     for (const i in metaSteps) {
       const metaStep = metaSteps[i];
-      if (isEqualMetaStep(metaStep, currentMetaSteps[i])) {
-        continue;
-      }
-      // close current metasteps
-      for (let j = i; j < currentMetaSteps.length; j++) {
-        await finishStepItem(currentMetaSteps[j]);
-        delete currentMetaSteps[j];
-      }
+      await startOneMetaStep(metaStep, test);
+    }
+  }
 
-      metaStepObj = currentMetaSteps[currentMetaSteps.length - 1] || {};
+  async function startOneMetaStep(metaStep, test) {
+    let metaStepKey = getKeyOfMetaStep(metaStep);
+    let parentMetaStep = metaStep.metaStep;
 
-      const isNested = !!metaStepObj.tempId;
-      metaStepObj = startTestItem(metaStep.toString(), rp_STEP, metaStepObj.tempId || testObj.tempId);
-      metaStep.tempId = metaStepObj.tempId;
-      debug(`${metaStep.tempId}: The stepId '${metaStep.toString()}' is started. Nested: ${isNested}`);
+    if (metaStepsSet[metaStepKey] != undefined) {
+      return undefined;
     }
 
-    currentMetaSteps = metaSteps;
-    return currentMetaSteps[currentMetaSteps.length - 1] || testObj;
+    if (metaStepsSet[metaStepKey] == undefined && parentMetaStep == undefined) {
+      // output.debug(`startOneMetaStep without Parent \n${inspect(metaStep)}`);
+      let metaStepObj = await startTestItem(launchObj.tempId, metaStep.toString(), rp_STEP, test.testTempId);
+      metaStep.tempId = metaStepObj.tempId;
+      let record = {
+        metaStep: metaStep,
+        metaStepObj: metaStepObj,
+      };
+
+      metaStepsSet[metaStepKey] = record;
+      return record;
+    }
+
+    await startOneMetaStep(parentMetaStep, test);
+    let parentStepKey = getKeyOfMetaStep(parentMetaStep);
+    let parentStep = metaStepsSet[parentStepKey]; // Must be set before
+
+    // output.debug(`startOneMetaStep with Parent \n${inspect(metaStep)}`);
+    let metaStepObj = await startTestItem(
+      launchObj.tempId,
+      metaStep.toString(),
+      rp_STEP,
+      parentStep.metaStepObj.tempId,
+    );
+    metaStep.tempId = metaStepObj.tempId;
+    let record = {
+      metaStep: metaStep,
+      metaStepObj: metaStepObj,
+    };
+
+    metaStepsSet[metaStepKey] = record;
+    return record;
   }
 
   function finishStepItem(step) {
     if (!step) return;
 
     debug(`Finishing '${step.toString()}' step`);
+    // output.debug(`Finishing step ${step.tempId}`);
 
-    return rpClient.finishTestItem(step.tempId, {
-      endTime: rpClient.helpers.now(),
-      status: rpStatus(step.status),
-    });
+    try {
+      return rpClient.finishTestItem(step.tempId, {
+        endTime: rpClient.helpers.now(),
+        status: rpStatus(step.status),
+      });
+    } catch (e) {
+      output.debug(inspect(e));
+    }
   }
 
   return this;
@@ -416,15 +461,9 @@ function iterateMetaSteps(step, fn) {
   if (step) fn(step);
 }
 
-const isEqualMetaStep = (metastep1, metastep2) => {
-  if (!metastep1 && !metastep2) return true;
-  if (!metastep1 || !metastep2) return false;
-  return (
-    metastep1.actor === metastep2.actor &&
-    metastep1.name === metastep2.name &&
-    metastep1.args.join(",") === metastep2.args.join(",")
-  );
-};
+function getKeyOfMetaStep(metaStep) {
+  return `${metaStep.actor}//${metaStep.name}//${metaStep.startTime}`;
+}
 
 function rpStatus(status) {
   if (status === "success") return rp_PASSED;
