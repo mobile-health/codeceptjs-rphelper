@@ -286,6 +286,7 @@ module.exports = (config) => {
       endpoint: config.endpoint,
       project: config.projectName,
       debug: config.debug,
+      apiKey: config.apiKey,
     });
 
     const launchOpts = {
