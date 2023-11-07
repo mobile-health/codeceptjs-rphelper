@@ -18,7 +18,6 @@ const rp_SUITE = "SUITE";
 const rp_TEST = "TEST";
 const rp_STEP = "STEP";
 
-console.log(`all Helpers = ${inspect(helpers)}`);
 const screenshotHelpers = ["WebDriver", "Appium", "Puppeteer", "TestCafe", "Playwright"];
 
 for (const helperName of screenshotHelpers) {
@@ -77,14 +76,14 @@ module.exports = (config) => {
   });
 
   event.dispatcher.on(event.test.started, (test) => {
-    console.log(`test.started - ${inspect(test)}`);
+    output.debug(`test.started - ${inspect(test)}`);
     recorder.add(async () => {
       await mobileHelper.startRecord();
     });
   });
 
   event.dispatcher.on(event.test.finished, (test) => {
-    console.log(`test.finished - ${inspect(test)}`);
+    output.debug(`test.finished - ${inspect(test)}`);
     recorder.add(async () => {
       await mobileHelper.stopRecord(getRecordTestFile(test.uid));
     });
@@ -126,7 +125,7 @@ module.exports = (config) => {
   });
 
   async function _sendResultsToRP(result) {
-    console.log(`_sendResultsToRP result = ${inspect(result)}`);
+    output.debug(`_sendResultsToRP result = ${inspect(result)}`);
 
     if (result) {
       for (suite of result.suites) {
@@ -151,7 +150,7 @@ module.exports = (config) => {
       await finishStepItem(suiteObj);
     }
 
-    console.log(`testArr = ${inspect(testArr)}`);
+    output.debug(`testArr = ${inspect(testArr)}`);
     if (process.env.RUNS_WITH_WORKERS) {
       for (test of testArr.passed) {
         testObj = await startTestItem(
@@ -206,19 +205,16 @@ module.exports = (config) => {
           testError: test.err,
           testSteps: test.steps,
         });
-        console.log(`check Record file`);
         let recordFile = getRecordTestFile(test.uid);
         if (fs.existsSync(recordFile)) {
-          console.log(`send record file`);
           let recordBody = await attachScreenRecord(recordFile);
-          console.log(`recordBody = ${inspect(recordBody)}`);
           await sendLogToRP({
             tempId: testObj.tempId,
             level: "debug",
             message: "Screen record",
             screenshotData: recordBody,
           });
-          console.log(`send record file success`);
+          output.debug(`send record file success - ${recordFile}`);
         }
 
         await finishStepItem(testObj);
@@ -227,7 +223,10 @@ module.exports = (config) => {
 
     for (test of testTempIdArr) {
       for (step of test.testSteps) {
-        const stepTitle = `[STEP] - ${step.actor} ${step.name} ${step.args ? step.args.join(" ") : ""}`;
+        output.debug(`step = \n${inspect(step)}`)
+        let args = step.args ? step.args : {}
+        args = JSON.stringify(args)
+        const stepTitle = `[STEP] - ${step.actor} ${step.name} ${args}`;
         const stepObj = await startTestItem(launchObj.tempId, stepTitle, rp_STEP, test.testTempId);
         stepObj.status = step.status || rp_PASSED;
         await finishStepItem(stepObj);
@@ -349,7 +348,7 @@ module.exports = (config) => {
         status: launchStatus,
         endTime: rpClient.helpers.now(),
       }).promise;
-      console.log(`sendLaunch result = ${inspect(result)}`);
+      output.debug(`sendLaunch result = ${inspect(result)}`);
       fs.writeFile(
         "../test_result_env.sh",
         `
@@ -360,7 +359,7 @@ module.exports = (config) => {
         },
       );
     } catch (error) {
-      console.log(`finishLaunch error : ${inspect(error)}`);
+      output.debug(`finishLaunch error : ${inspect(error)}`);
       debug(error);
     }
   }
