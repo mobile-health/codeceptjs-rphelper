@@ -91,7 +91,7 @@ module.exports = (config) => {
   });
 
   function getRecordTestFile(testId) {
-    return `./output/record-test-${testId}.mp4`;
+    return `./output/record-test-${clearString(testId)}.mp4`;
   }
 
   async function startTestItem(launchId, testTitle, method, parentId = null) {
