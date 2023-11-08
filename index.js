@@ -79,14 +79,22 @@ module.exports = (config) => {
   event.dispatcher.on(event.test.started, (test) => {
     // output.debug(`test.started - ${inspect(test)}`);
     recorder.add(async () => {
-      await mobileHelper.startRecord();
+      try {
+        await mobileHelper.startRecord();
+      } catch (e) {
+        output.error(e);
+      }
     });
   });
 
   event.dispatcher.on(event.test.finished, (test) => {
     // output.debug(`test.finished - ${inspect(test)}`);
     recorder.add(async () => {
-      await mobileHelper.stopRecord(getRecordTestFile(test.uid));
+      try {
+        await mobileHelper.stopRecord(getRecordTestFile(test.uid));
+      } catch (e) {
+        output.error(e);
+      }
     });
   });
 
