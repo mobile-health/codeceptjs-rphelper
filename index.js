@@ -70,6 +70,20 @@ module.exports = (config) => {
 
   event.dispatcher.on(event.test.failed, async (test, err) => {
     testArr.push(test);
+
+    if (config.disableScreenshots) {
+      // old version of disabling screenshots
+      return;
+    }
+
+    try {
+      output.debug("start screenShot");
+      const fileName = getScreenshotFileName(test);
+      await helper.saveScreenshot(fileName);
+      output.debug("end screenShot");
+    } catch (e) {
+      output.error(e);
+    }
   });
 
   event.dispatcher.on(event.test.passed, (test) => {
@@ -123,14 +137,22 @@ module.exports = (config) => {
 
   event.dispatcher.on(event.workers.result, async (result) => {
     recorder.add(async () => {
-      await _sendResultsToRP(result);
+      try {
+        await _sendResultsToRP(result);
+      } catch (e) {
+        output.error(e);
+      }
     });
   });
 
   event.dispatcher.on(event.all.result, async () => {
     if (!process.env.RUNS_WITH_WORKERS) {
       recorder.add(async () => {
-        await _sendResultsToRP();
+        try {
+          await _sendResultsToRP();
+        } catch (e) {
+          output.error(e);
+        }
       });
     }
   });
@@ -213,7 +235,9 @@ module.exports = (config) => {
           testTempId: testObj.tempId,
           testError: test.err,
           testSteps: test.steps,
+          uid: test.uid,
         });
+
         let recordFile = getRecordTestFile(test.uid);
         if (fs.existsSync(recordFile)) {
           let recordBody = await attachScreenRecord(recordFile);
@@ -237,7 +261,7 @@ module.exports = (config) => {
         args = JSON.stringify(args);
         // output.debug(`step = ${inspect(step)}`);
         let metaStep = step.metaStep;
-        metaStep = metaStep ? metaStepsSet[getKeyOfMetaStep(metaStep)] : undefined;
+        metaStep = metaStep ? metaStepsSet[getStepUniqueId(metaStep)] : undefined;
         // output.debug(`metaStep = ${inspect(metaStep)}`);
         let parentId = test.testTempId;
 
@@ -252,12 +276,17 @@ module.exports = (config) => {
             level: "ERROR",
             message: `[FAILED STEP] - ${step.err.stack ? step.err.stack : JSON.stringify(step.err)}`,
           });
-          await sendLogToRP({
-            tempId: stepObj.tempId,
-            level: "debug",
-            message: "Last seen screenshot",
-            screenshotData: await attachScreenshot(`${clearString(test.testTitle)}.failed.png`),
-          });
+
+          const screenShotFile = getScreenshotFileName(test);
+          if (fs.existsSync(screenShotFile)) {
+            await sendLogToRP({
+              tempId: stepObj.tempId,
+              level: "debug",
+              message: "Last seen screenshot",
+              screenshotData: await attachScreenshot(screenShotFile),
+            });
+            output.debug(`[reportPortal] screenShot is sent | ${screenShotFile}`);
+          }
         }
 
         if (stepObj.status === "failed" && step.test.err) {
@@ -266,12 +295,17 @@ module.exports = (config) => {
             level: "ERROR",
             message: `[FAILED STEP] - ${JSON.stringify(step.test.err)}`,
           });
-          await sendLogToRP({
-            tempId: stepObj.tempId,
-            level: "debug",
-            message: "Last seen screenshot",
-            screenshotData: await attachScreenshot(`${clearString(test.testTitle)}.failed.png`),
-          });
+
+          const screenShotFile = getScreenshotFileName(test);
+          if (fs.existsSync(screenShotFile)) {
+            await sendLogToRP({
+              tempId: stepObj.tempId,
+              level: "debug",
+              message: "Last seen screenshot",
+              screenshotData: await attachScreenshot(screenShotFile),
+            });
+            output.debug(`[reportPortal] screenShot is sent | ${screenShotFile}`);
+          }
         }
       }
 
@@ -309,14 +343,18 @@ module.exports = (config) => {
   }
 
   async function sendLogToRP({ tempId, level, message, screenshotData }) {
-    return rpClient.sendLog(
-      tempId,
-      {
-        level,
-        message,
-      },
-      screenshotData,
-    ).promise;
+    try {
+      return rpClient.sendLog(
+        tempId,
+        {
+          level,
+          message,
+        },
+        screenshotData,
+      ).promise;
+    } catch (e) {
+      output.error(e);
+    }
   }
 
   async function attachScreenRecord(fileName) {
@@ -324,7 +362,7 @@ module.exports = (config) => {
 
     let content;
 
-    if (fileName) {
+    if (fs.existsSync(fileName)) {
       try {
         content = fs.readFileSync(fileName);
         fs.unlinkSync(fileName);
@@ -345,22 +383,10 @@ module.exports = (config) => {
     if (!helper) return undefined;
     let content;
 
-    if (!fileName) {
-      fileName = `${rpClient.helpers.now()}_failed.png`;
-      try {
-        await helper.saveScreenshot(fileName);
-        content = fs.readFileSync(path.join(global.output_dir, fileName));
-        fs.unlinkSync(path.join(global.output_dir, fileName));
-      } catch (err) {
-        output.error("Couldn't save screenshot");
-        return undefined;
-      }
-    } else {
-      content = fs.readFileSync(path.join(global.output_dir, fileName));
-    }
+    content = fs.readFileSync(fileName);
 
     return {
-      name: fileName,
+      name: clearString(fileName),
       type: "image/png",
       content,
     };
@@ -399,7 +425,7 @@ module.exports = (config) => {
   }
 
   async function startOneMetaStep(metaStep, test) {
-    let metaStepKey = getKeyOfMetaStep(metaStep);
+    let metaStepKey = getStepUniqueId(metaStep);
     let parentMetaStep = metaStep.metaStep;
 
     if (metaStepsSet[metaStepKey] != undefined) {
@@ -420,7 +446,7 @@ module.exports = (config) => {
     }
 
     await startOneMetaStep(parentMetaStep, test);
-    let parentStepKey = getKeyOfMetaStep(parentMetaStep);
+    let parentStepKey = getStepUniqueId(parentMetaStep);
     let parentStep = metaStepsSet[parentStepKey]; // Must be set before
 
     // output.debug(`startOneMetaStep with Parent \n${inspect(metaStep)}`);
@@ -470,8 +496,12 @@ function iterateMetaSteps(step, fn) {
   if (step) fn(step);
 }
 
-function getKeyOfMetaStep(metaStep) {
-  return `${metaStep.actor}//${metaStep.name}//${metaStep.startTime}`;
+function getStepUniqueId(step) {
+  return clearString(`${step.actor}//${step.name}//${step.startTime}`);
+}
+
+function getScreenshotFileName(test) {
+  return `./output/${test.uid}.failed.png`;
 }
 
 function rpStatus(status) {
