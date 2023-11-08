@@ -399,15 +399,15 @@ module.exports = (config) => {
         status: launchStatus,
         endTime: rpClient.helpers.now(),
       }).promise;
+
+      const projectDir = global.codecept_dir;
+      const testSummaryEnvFile = path.join(projectDir, "test_result.env.sh");
       // output.debug(`sendLaunch result = ${inspect(result)}`);
-      fs.writeFile(
-        "../test_result_env.sh",
+      fs.appendFileSync(
+        testSummaryEnvFile,
         `
           export REPORT_PORTAL_RESULT_LINK="${result.link}"
         `,
-        function (err) {
-          if (err) throw err;
-        },
       );
     } catch (error) {
       output.debug(`finishLaunch error : ${inspect(error)}`);
