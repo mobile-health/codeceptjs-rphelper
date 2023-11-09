@@ -3,3 +3,4 @@ node_modules
 test/output/*
 .idea
 *.tgz
+.envrc

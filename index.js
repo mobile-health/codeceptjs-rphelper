@@ -117,6 +117,7 @@ module.exports = (config) => {
   }
 
   async function startTestItem(launchId, testTitle, method, parentId = null) {
+    // output.debug(`startTestItem : testTitle = ${testTitle}`)
     try {
       const hasStats = method !== rp_STEP;
       const result = rpClient.startTestItem(
@@ -492,6 +493,7 @@ function metaStepsToArray(step) {
 }
 
 function iterateMetaSteps(step, fn) {
+  if (!step) return;
   if (step.metaStep) iterateMetaSteps(step.metaStep, fn);
   if (step) fn(step);
 }
