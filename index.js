@@ -5,6 +5,7 @@ const debug = require("debug")("codeceptjs:reportportal");
 const { isMainThread } = require("worker_threads");
 const { clearString } = require("codeceptjs/lib/utils");
 const { inspect } = require("util");
+const { execSync } = require("child_process");
 
 const { event, recorder, output, container } = codeceptjs;
 
@@ -105,7 +106,20 @@ module.exports = (config) => {
     // output.debug(`test.finished - ${inspect(test)}`);
     recorder.add(async () => {
       try {
-        await mobileHelper.stopRecord(getRecordTestFile(test.uid));
+        const recordFile = getRecordTestFile(test.uid);
+        await mobileHelper.stopRecord(recordFile);
+        const fileSize = fs.statSync(recordFile).size;
+        const fileSizeInM = fileSize / 1024 ** 2;
+        const pwd = global.codecept_dir;
+        const recordFileAbs = pwd + "/" + recordFile;
+        const tempFile = pwd + "/" + "temp.mp4";
+        console.log(`recordFile = ${inspect(recordFile)}`);
+        console.log(`fileSize = ${inspect(fileSizeInM)}`);
+        console.log(`recordFileAbs = ${recordFileAbs}`);
+        if (fileSizeInM > 10) {
+          execSync(`ffmpeg -i ${recordFileAbs} -vcodec libx264 -crf 24 ${tempFile}`);
+          execSync(`mv  ${tempFile} ${recordFileAbs}`);
+        }
       } catch (e) {
         output.error(e);
       }
